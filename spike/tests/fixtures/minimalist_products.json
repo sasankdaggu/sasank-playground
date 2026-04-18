@@ -1,0 +1,34 @@
+{
+  "products": [
+    {
+      "id": 1,
+      "title": "Niacinamide 10% Face Serum",
+      "vendor": "Minimalist",
+      "product_type": "Serum",
+      "handle": "niacinamide-10",
+      "body_html": "<p>Balances oil. Fades marks.</p>",
+      "tags": "face,serum,oily-skin",
+      "images": [{"src": "https://cdn.shopify.com/img/niacinamide.jpg"}],
+      "variants": [
+        {"id": 10, "title": "Default Title", "price": "449.00",
+         "compare_at_price": "549.00", "available": true, "sku": "NIA-10-30"}
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Salicylic Acid 2% Face Wash",
+      "vendor": "Minimalist",
+      "product_type": "",
+      "handle": "salicylic-2",
+      "body_html": "",
+      "tags": "",
+      "images": [],
+      "variants": [
+        {"id": 20, "title": "100ml", "price": "299.00",
+         "compare_at_price": null, "available": true, "sku": "SAL-2-100"},
+        {"id": 21, "title": "50ml", "price": "179.00",
+         "compare_at_price": null, "available": false, "sku": "SAL-2-50"}
+      ]
+    }
+  ]
+}
