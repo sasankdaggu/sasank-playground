@@ -1,0 +1,25 @@
+# Superpowers brainstorm artifacts (local only)
+.superpowers/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Node / Python / env
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.local
+.venv/
+venv/
+
+# Build
+dist/
+build/
+.next/
+out/
