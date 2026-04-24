@@ -33,15 +33,16 @@ log = structlog.get_logger()
 # Face skincare category entry points — one per marketplace.
 # The scraper navigates here, extracts product URLs, then visits each.
 FACE_CATEGORY_URLS: dict[str, list[str]] = {
+    # Nykaa: use search URLs — category pages trigger HTTP2 reset (anti-bot).
     "nykaa": [
-        "https://www.nykaa.com/beauty/skin/face-serums/c/1205?sortby=popularity",
-        "https://www.nykaa.com/beauty/skin/moisturizers-and-creams/face-moisturiser/c/1217?sortby=popularity",
-        "https://www.nykaa.com/beauty/skin/face-wash-and-cleansers/c/1237?sortby=popularity",
+        "https://www.nykaa.com/search/result/?q=face+serum&root=search&searchType=Manual",
+        "https://www.nykaa.com/search/result/?q=face+moisturizer&root=search&searchType=Manual",
+        "https://www.nykaa.com/search/result/?q=face+wash&root=search&searchType=Manual",
     ],
     "amazon_in": [
-        "https://www.amazon.in/s?k=face+serum&i=beauty&rh=n%3A1355016031&s=review-rank",
-        "https://www.amazon.in/s?k=face+moisturizer&i=beauty&rh=n%3A1355016031&s=review-rank",
-        "https://www.amazon.in/s?k=face+wash+india&i=beauty&rh=n%3A1355016031&s=review-rank",
+        "https://www.amazon.in/s?k=face+serum&i=beauty",
+        "https://www.amazon.in/s?k=face+moisturizer+india&i=beauty",
+        "https://www.amazon.in/s?k=face+wash+india&i=beauty",
     ],
     "tira": [
         "https://www.tirabeauty.com/category/face-serum-46",
@@ -49,9 +50,9 @@ FACE_CATEGORY_URLS: dict[str, list[str]] = {
         "https://www.tirabeauty.com/category/face-wash-cleanser-44",
     ],
     "purplle": [
-        "https://www.purplle.com/skin-care/face-serum?sort=popular",
-        "https://www.purplle.com/skin-care/face-moisturiser?sort=popular",
-        "https://www.purplle.com/skin-care/face-wash?sort=popular",
+        "https://www.purplle.com/face",
+        "https://www.purplle.com/search?q=face+serum",
+        "https://www.purplle.com/search?q=face+moisturizer",
     ],
 }
 
@@ -59,23 +60,21 @@ FACE_CATEGORY_URLS: dict[str, list[str]] = {
 # Each entry is tried in order; first one that yields URLs wins.
 PRODUCT_LINK_SELECTORS: dict[str, list[str]] = {
     "nykaa": [
-        "a.css-qlopj4",           # product card link (primary)
-        "a[href*='/p/']",         # fallback: any link with /p/ (product detail pattern)
+        "a[href*='/p/']",          # product detail URLs contain /p/
+        "a[href*='nykaa.com/']",   # broad fallback
     ],
     "amazon_in": [
-        "a.a-link-normal.s-no-outline",
-        "h2 a.a-link-normal",
-        "a[href*='/dp/']",         # ASIN links
+        "a[href*='/dp/']",         # ASIN product detail links
+        "h2 a",                    # search result title links
     ],
     "tira": [
-        "a.product-card__link",
         "a[href*='/product/']",
-        "a[href*='/p/']",
+        "a.product-card__link",
     ],
     "purplle": [
-        "a.product-card-link",
-        "a[href*='/beauty/']",
-        "a.jsx-product-card",
+        "a[href*='/product/']",    # Purplle product detail URLs
+        "a[href*='-pid-']",        # alternate product URL pattern
+        "a[href*='/p/']",
     ],
 }
 
@@ -107,8 +106,8 @@ async def discover_product_urls(
             break
         log.info("navigating_category", url=cat_url)
         try:
-            await page.goto(cat_url, wait_until="domcontentloaded", timeout=30000)
-            await human_delay(page, extra=2.0)  # extra wait for JS to render product grid
+            await page.goto(cat_url, wait_until="networkidle", timeout=40000)
+            await human_delay(page, extra=3.0)  # extra wait for JS to render product grid
         except Exception as e:
             log.warning("category_nav_failed", url=cat_url, error=str(e))
             continue
@@ -211,7 +210,10 @@ async def scrape_retailer(
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"],
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-http2",  # some sites reset HTTP2 connections on headless detection
+            ],
         )
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
