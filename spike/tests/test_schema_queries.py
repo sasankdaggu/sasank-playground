@@ -122,3 +122,81 @@ def test_v0_search_query_uses_trgm(db_v0: psycopg.Connection) -> None:
         names = [r[0] for r in cur.fetchall()]
         assert any("Vitamin C" in n for n in names)
     db_v0.commit()
+
+
+@pytest.fixture()
+def db_v1():
+    if not _db_available():
+        pytest.skip("Postgres not available")
+    with _pg_conn() as conn:
+        _load_schema(conn, SPIKE_ROOT / "src" / "spike" / "schema" / "v1.sql")
+        yield conn
+
+
+def test_v1_loads_cleanly(db_v1: psycopg.Connection) -> None:
+    with db_v1.cursor() as cur:
+        cur.execute("SELECT count(*) FROM core.products")
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT count(*) FROM scraping.ingredient_extraction_queue")
+        assert cur.fetchone()[0] == 0
+
+
+def test_v1_rating_columns_queryable(db_v1: psycopg.Connection) -> None:
+    """Delta 4: rating split into value+count — verify they're independently queryable."""
+    with db_v1.cursor() as cur:
+        cur.execute("INSERT INTO core.brands (name) VALUES ('Purplle Brand') RETURNING id")
+        brand_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.products (brand_id, canonical_name) VALUES (%s, 'Vitamin C Serum') RETURNING id",
+            (brand_id,),
+        )
+        product_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.retailers (slug, name, base_url) VALUES ('purplle', 'Purplle', 'https://purplle.com') RETURNING id"
+        )
+        retailer_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.retailer_listings (product_id, retailer_id, listing_url, current_price, rating_value, rating_count) "
+            "VALUES (%s, %s, %s, 499.0, 4.3, 212) RETURNING id",
+            (product_id, retailer_id, "https://purplle.com/p/x"),
+        )
+        cur.execute(
+            "SELECT rating_value, rating_count FROM core.retailer_listings WHERE product_id = %s",
+            (product_id,),
+        )
+        row = cur.fetchone()
+        assert float(row[0]) == 4.3
+        assert row[1] == 212
+    db_v1.commit()
+
+
+def test_v1_ingredient_queue_tracks_pending(db_v1: psycopg.Connection) -> None:
+    """Delta 2: ingredient_extraction_queue — every product starts as pending."""
+    with db_v1.cursor() as cur:
+        cur.execute("INSERT INTO core.brands (name) VALUES ('Minimalist') RETURNING id")
+        brand_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.products (brand_id, canonical_name, ingredient_scrape_status) "
+            "VALUES (%s, 'Niacinamide 10%%', 'pending') RETURNING id",
+            (brand_id,),
+        )
+        product_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.retailers (slug, name, base_url) VALUES ('minimalist', 'Minimalist', 'https://beminimalist.co') RETURNING id"
+        )
+        retailer_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO core.retailer_listings (product_id, retailer_id, listing_url) VALUES (%s, %s, %s) RETURNING id",
+            (product_id, retailer_id, "https://beminimalist.co/p/x"),
+        )
+        listing_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO scraping.ingredient_extraction_queue (product_id, listing_id) VALUES (%s, %s)",
+            (product_id, listing_id),
+        )
+        cur.execute(
+            "SELECT status FROM scraping.ingredient_extraction_queue WHERE product_id = %s",
+            (product_id,),
+        )
+        assert cur.fetchone()[0] == 'pending'
+    db_v1.commit()
