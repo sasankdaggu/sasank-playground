@@ -14,18 +14,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
-import json
 import random
-import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
 from dotenv import load_dotenv
 from playwright.async_api import Page, async_playwright
-from playwright_stealth import Stealth
 
 from spike.models import ParsedSample, RawCapture
 from spike.samplers.base import persist_parsed, persist_raw
@@ -228,11 +223,8 @@ async def scrape_retailer(
             locale="en-IN",
             timezone_id="Asia/Kolkata",
         )
-        stealth = Stealth()
-
         # Discovery page.
         disc_page = await context.new_page()
-        await stealth.use_async(disc_page)
         product_urls = await discover_product_urls(
             disc_page, cat_urls, selectors, MAX_PER_RETAILER, base_url
         )
@@ -252,7 +244,6 @@ async def scrape_retailer(
         samples: list[ParsedSample] = []
         for url in product_urls:
             prod_page = await context.new_page()
-            await stealth.use_async(prod_page)
             sample = await scrape_product_page(prod_page, url, retailer_slug, raw_dir, parsed_dir)
             await prod_page.close()
             if sample:
