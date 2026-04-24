@@ -106,8 +106,9 @@ async def discover_product_urls(
             break
         log.info("navigating_category", url=cat_url)
         try:
-            await page.goto(cat_url, wait_until="networkidle", timeout=40000)
-            await human_delay(page, extra=3.0)  # extra wait for JS to render product grid
+            await page.goto(cat_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(5000)  # let JS product grid render
+            await human_delay(page, extra=1.0)
         except Exception as e:
             log.warning("category_nav_failed", url=cat_url, error=str(e))
             continue
@@ -287,5 +288,9 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
 
-    target_retailers = [args.retailer] if args.retailer else list(FACE_CATEGORY_URLS.keys())
+    # Nykaa and Amazon.in block headless browsers without a residential proxy.
+    # For the local spike, run only Tira and Purplle. Shopify D2C brands are
+    # handled separately by run_sample_crawl.py --dry.
+    PROXY_FREE_RETAILERS = ["tira", "purplle"]
+    target_retailers = [args.retailer] if args.retailer else PROXY_FREE_RETAILERS
     asyncio.run(main(target_retailers, dry=args.dry))
