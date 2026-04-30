@@ -261,27 +261,132 @@ In Plan 2, the only consumer of this UX is the Settings screen "Add another reta
 
 ## 10. Screens
 
-### Home
-- Animated kibble bin illustration with fill % matching latest reading
-- "Last updated: 2h ago" timestamp
-- "Days remaining: 12" + "Next predicted order: May 12"
-- Prophet forecast graph (historical + forecast band) — gracefully shows historical only when `status=insufficient_data`
-- BLE connection chip (connected / disconnected / scanning)
-- "Read now" button (triggers immediate BLE read)
-- Auto-order toggle (Plan 2: visible but with a "Auto-order coming with Plan 3" tooltip on tap)
+All screens use the **Deep Botanical** design system. Forest-green app bar (`#003a2e`), warm-cream canvas (`#f2fcf7`), sage container cards (`#E8F0EA`), Noto Serif headlines, Manrope body and labels. App bar contains a sage-circle profile icon (left), the "Kibble" wordmark in italic Noto Serif white (center), and a sync indicator with a status dot (right).
 
-### Orders
-- Stub current-deal card: "Auto-order activates after Plan 3 ships — your sensor data is being collected in the meantime"
-- Placeholder section for future deal comparison table
-- Past orders list (empty until Plan 4 places real orders)
+Bottom nav: three items (Home / Orders / Settings) in all-caps Manrope label-sm, active item has a sage pill behind the icon.
 
-### Settings
-- Reorder threshold (slider with backend-recommended value highlighted)
-- Payment mode (90% / 100%)
-- Pack size preference
-- Deal criteria: minimum seller rating, pinned retailer, blacklisted retailers (UI built; values stored on `User` for Plan 3)
-- Manage retailer sessions: list of currently logged-in retailers with expiry, "Add another retailer" button (exercises the per-retailer login flow from onboarding step 8), re-login when expired, revoke credentials
-- Notification preferences
+### Welcome (pre-auth)
+- Hero photograph: golden retriever on a cream couch, soft natural light, masked with a 24px corner radius
+- Wordmark: "Kibble" in Noto Serif italic, Forest Green
+- Headline: **"Never run out of dog food again."** (Noto Serif h1, deep charcoal)
+- Primary button: **"Continue with phone"** (filled forest green, all-caps Manrope label-sm)
+- Secondary button: **"Continue with Google"** (forest-outlined, all-caps)
+- Footer: small Manrope body-sm: *"By continuing, you agree to our Terms of Service and Privacy Policy."*
+
+### Home (the hero screen)
+
+This is the most-viewed surface and the hero of the brand. Two states: **normal** and **low stock / reordering**.
+
+**Layout (top to bottom):**
+1. Forest-green app bar (profile · Kibble wordmark · sync indicator)
+2. Hero zone (cream canvas):
+   - Custom illustrated **kibble container**: tea-canister silhouette with sage body, forest outline (2px), forest lid, sage knob. Fill is forest green (or warm amber when below reorder threshold). Subtle decorative botanical leaves at the corners. Small sensor dot on the underside of the lid.
+   - Below container: large numeric percentage in Noto Serif (~56px) — color shifts from Forest Green (normal) to Warm Amber (low stock).
+   - Headline (Noto Serif h2): **"About 8 days of food left"** (or "About 4 days of food left" in low state)
+   - Subtitle (Manrope body-md, on-surface-variant): **"Next refill projected for Tue, May 8"** (or "Reorder triggered automatically")
+3. **Forecast card** (sage container, 16px radius): label "14-DAY FORECAST" in Manrope label-sm. Inside: line chart with solid forest line for historical readings, dashed forest line for forecast, soft sage gradient confidence band, dashed amber line at the user's reorder threshold %, vertical "NOW" marker. Below chart: Manrope label-sm row "2 WEEKS AGO · NOW · +2 WEEKS".
+4. **Status row**: sage chip "Sensor connected" with a forest dot · right-aligned "Last reading 2h ago" (Manrope body-sm).
+5. **Read now** button (filled forest, full width, all-caps).
+6. **Auto-reorder on** toggle row (sage pill background, label all-caps, switch on the right).
+
+**Low-stock variant adds at the top of the main scroll**, just below the app bar:
+- Soft amber banner with a "REORDERING" pill: *"Buddy is running low. We're placing a 5kg order from Supertails — arriving Tue, May 8 for ₹1,499."*
+- The "Read now" button is replaced by **"View order"** (filled forest).
+- Numeric %, container fill, and the now-marker on the chart all turn warm amber.
+
+**Insufficient-data variant** (under 4 readings):
+- Forecast card shows the historical line only — no dashed forecast, no confidence band.
+- Subtitle becomes: *"We'll start projecting once we have a few more readings."*
+- Container illustration still renders if calibration is complete; otherwise shows an empty bin with a "Calibrate to begin" link to settings.
+
+### Orders (Plan 2 stub)
+- App bar
+- Centered **package illustration** on a sage circular backdrop (24px corner radius, soft tonal-layer feel matching the Deep Botanical aesthetic — cream paper bag with a forest-green ribbon on a sage podium)
+- Headline (Noto Serif h2): **"Auto-order activates soon"**
+- Body (Manrope body-md): *"We're learning Buddy's eating pattern. As soon as we know your kibble's rhythm, we'll find the best deal and arrange the next refill — right on time."*
+- Primary button: **"Manage preferences"** → routes to Settings → Reorder preferences
+- Bottom nav (Orders active)
+
+(Stitch's draft used "customized botanical blend" copy borrowed from a tea-brand template — replaced everywhere with the kibble-appropriate copy above.)
+
+### Settings (sectioned list, sage card per section, ample whitespace)
+
+Each section has a Manrope label-sm header in muted text. Sections, in order:
+
+1. **Profile** — row: avatar · name · pincode · edit chevron
+2. **Reorder preferences**
+   - Slider: "Reorder when **20%** remains" · forest thumb on sage track
+   - Pack size preference: segmented control (3kg · 5kg · 10kg · **Best value**)
+3. **Payment** — segmented control: **"90% autonomous"** (selected) · "100% autonomous"
+4. **Retailers**
+   - List of currently configured retailers: row per retailer with logo, name, sign-in type pill (`Cookie` or `Credentials`), expiry, sage check or amber re-login chip
+   - **"Add another retailer"** button (forest outlined, full width)
+   - Tapping a retailer opens a row detail with "Re-sign in" and "Remove" actions
+5. **Notifications**
+   - Toggle: "Quiet hours **10pm–8am IST**" (default ON)
+   - Time-range picker for the quiet window
+   - Toggle for low-stock alerts (default ON)
+   - Toggle for sensor-disconnected alerts (default ON)
+6. **About** — version, terms, privacy
+7. **Sign out** — error-color row, single tap (with confirmation sheet)
+
+### Add Retailer (bottom sheet from Settings or Plan 4 "better deal found" prompt)
+- Sheet title (Noto Serif h3): **"Add a retailer"**
+- Subtitle (Manrope body-md, muted): *"Sign in once. We'll save it securely so we can find deals for you."*
+- Cards grouped under Manrope label-sm headers:
+  - **Pet specialists** — Supertails · HUFT (`Cookie sign-in` pill)
+  - **Marketplace** — Amazon.in (`Credentials sign-in` pill)
+  - **Quick commerce** — Blinkit · Zepto · Swiggy Instamart (`Credentials sign-in` pill)
+  - **D2C brands** — Henlo · Drools · Pawlicious (`Cookie sign-in` pill)
+- Each card: retailer logo, name, sign-in type pill, chevron right
+- A sage outlined ring around the user's currently-preferred retailer
+
+### Onboarding screens (9 steps, full-screen each)
+
+All onboarding screens share a common chrome:
+- Forest-green app bar with **"Setting up Kibble"** label and a step indicator (e.g., "Step 4 of 9")
+- Cream canvas
+- Headline (Noto Serif h2)
+- Body or input (Manrope)
+- Primary button at the bottom (filled forest, all-caps, "Continue")
+- Optional Skip link below for the few steps that allow skip
+
+Per-step copy:
+
+1. **Welcome / Sign-in** — see Welcome screen above. After Firebase login, profile entry.
+2. **Profile** — Headline: *"Hello! What should we call you?"* · Inputs: full name, pincode (validates Indian PIN format)
+3. **Tell us about your dog** — Headline: *"Who are we feeding?"* · Inputs: dog name, breed (optional autocomplete), kibble brand (autocomplete), kibble product (free text)
+4. **Container size** — Headline: *"How big is your kibble bin?"* · Slider 1–25 kg with the selected value rendered in large Noto Serif. Default 10kg.
+5. **Calibrate empty** — Headline: *"Let's calibrate your bin."* · Body: *"Empty your kibble bin completely, then place the sensor on the inside of the lid."* · Illustration: hand placing a small white sensor disc on the underside of a cream container lid (sage backdrop, soft outline). · Primary: **"Set empty level"** · Skip link: *"I'll do this later"*
+6. **Pack size preference** — Headline: *"Which pack size suits you?"* · Cards: 3kg · 5kg · 10kg · **Best value** (auto-recommended) · Body under each: rough monthly cost estimate
+7. **Reorder threshold** — Headline: *"When should we reorder?"* · Slider with thumb showing percentage and a dynamic line: *"We'll order when about 4 days of food remains."* · Default 20%.
+8. **Pick your preferred retailer** — Headline: *"Where do you usually shop?"* · Card grid (same component as Add Retailer sheet) with single-select. Selecting a card opens the appropriate sign-in flow (cookie WebView or credential form).
+9. **Delivery estimate** — Headline: *"Last step — checking delivery to **560001**."* · Body: *"This may take a moment."* · While Plan 3 endpoint is unavailable: shows an editorial-styled deferred state ("We'll confirm delivery details when your first reorder is placed.") · Primary: **"Finish setup"**.
+
+### Per-retailer login flows (used in step 8 and Add Retailer)
+
+**Cookie capture (D2C / Supertails / HUFT):**
+- Bottom sheet appears with "Sign in to **Supertails**" title
+- Embedded WebView pointed at the retailer's login page
+- After successful login, a JS bridge captures the session and the sheet closes with a sage success toast: *"Signed in to Supertails."*
+
+**Credential entry (Amazon / quick commerce):**
+- Native sage card with retailer logo
+- Body (Manrope body-md): *"We'll use these credentials only to check prices and place orders you approve. Stored encrypted. You can revoke any time from Settings."*
+- Inputs: email/phone, password (masked, with reveal toggle)
+- Primary: **"Sign in to Amazon"**
+- Secondary: **"Cancel"**
+
+### Push notifications
+- App icon: solid forest-green circle with a single cream kibble-piece glyph (oval with a soft notch)
+- Title (system bold): "Kibble"
+- Body for low stock: *"Buddy is at 12% — about 4 days of food left."*
+- Body for sensor disconnect: *"We haven't heard from your sensor in 24 hours. Tap to troubleshoot."*
+
+### Empty / loading / error states (consistent treatment)
+- All empty states: centered illustration on sage circle, Noto Serif headline, Manrope body, primary call-to-action
+- Loading: forest-on-cream linear progress bar at the top of the screen + skeleton sage cards in the body
+- Errors: amber banner at the top with a "Try again" link; never a destructive red unless the user is about to lose data
 
 ## 11. Notifications (FCM)
 
