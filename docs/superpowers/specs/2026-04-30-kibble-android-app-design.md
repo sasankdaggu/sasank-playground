@@ -27,6 +27,21 @@ Build a production-quality Android app that:
 - Instrumented UI tests
 - iOS or web clients
 
+## 2.5. Brand & Design System
+
+The visual identity is **Deep Botanical** — quiet luxury borrowed from premium tea-brand aesthetics, applied to a pet-care utility. Editorial typography (Noto Serif headlines, Manrope body), forest-green primary against warm-cream surfaces, sage container layers, generous whitespace, no drop shadows, tonal-layer depth instead.
+
+Full design system spec lives at `docs/superpowers/specs/assets/2026-04-30-kibble-design-system.md` and is the authoritative reference for colors, typography, shape, and components.
+
+**Brand wordmark:** "Kibble" set in Noto Serif italic, rendered in Forest Green (#155243) on cream surfaces or Cream (#FCFAF7) on forest immersive headers.
+
+**Tone of copy:** editorial-calm, dog-aware but not childish. Examples:
+- Welcome: "Never run out of dog food again."
+- Low stock: "Buddy is running low — auto-reorder will arrive Tuesday."
+- Empty orders: "Auto-order activates soon. We're learning Buddy's eating pattern."
+
+**Note on Stitch-generated copy:** the design agent's placeholder copy ("Your customized botanical blend...") describes a tea subscription, not dog kibble. All copy in the implementation should be re-written to match the kibble product context while preserving the editorial-calm tone.
+
 ## 3. Tech Stack
 
 | Layer | Choice |
@@ -45,7 +60,7 @@ Build a production-quality Android app that:
 | Push | Firebase Cloud Messaging |
 | Testing | JUnit 5 for JVM unit tests (ViewModels, Repositories, BLE service logic), MockK, Turbine, MockWebServer, in-memory Room. No instrumented tests in Plan 2. |
 | Build | Gradle 8+ with version catalogs (`libs.versions.toml`) and convention plugins in `build-logic/` for shared Compose/Hilt/coroutines config |
-| Theming | Material 3 with dynamic color (Android 12+); light + dark mode mandatory |
+| Theming | Material 3 with the **Deep Botanical** design system (`assets/2026-04-30-kibble-design-system.md`). Custom theme — does NOT use Android 12+ dynamic color. Brand identity is consistent across devices. Light + dark mode mandatory. Headlines: Noto Serif. Body/labels: Manrope. Primary: forest green `#155243`. Secondary: sage `#E8F0EA`. Surface: warm cream `#FCFAF7`. Text: deep charcoal `#2D3633`. |
 | Accessibility | Content descriptions on all icons, semantic roles on interactive elements, supports system font scaling up to 200% |
 | Analytics | `Analytics` interface in `:core:common` with no-op default; concrete implementation deferred (PostHog/Mixpanel) |
 | Min SDK | 26 (Android 8.0) — required for stable BLE + foreground services |
