@@ -284,7 +284,12 @@ This is the most-viewed surface and the hero of the brand. Two states: **normal*
    - Below container: large numeric percentage in Noto Serif (~56px) — color shifts from Forest Green (normal) to Warm Amber (low stock).
    - Headline (Noto Serif h2): **"About 8 days of food left"** (or "About 4 days of food left" in low state)
    - Subtitle (Manrope body-md, on-surface-variant): **"Next refill projected for Tue, May 8"** (or "Reorder triggered automatically")
-3. **Forecast card** (sage container, 16px radius): label "14-DAY FORECAST" in Manrope label-sm. Inside: line chart with solid forest line for historical readings, dashed forest line for forecast, soft sage gradient confidence band, dashed amber line at the user's reorder threshold %, vertical "NOW" marker. Below chart: Manrope label-sm row "2 WEEKS AGO · NOW · +2 WEEKS".
+3. **Forecast card** (light-sage container `#ecf6f1`, 20px radius, no shadow):
+   - **Header row**: label `CONSUMPTION FORECAST` (Manrope label-sm, all-caps, on-surface-variant) on the left; status word in Noto Serif (h3-size, primary forest color in normal state, warning amber in low state) on the right. The status word is a one-glance summary of whether actual consumption is tracking the forecast: **Steady** (matches model), **Falling** (faster than expected), **Climbing** (slower than expected). Computed by comparing the latest 7-day actual slope against the model's expected slope.
+   - **Chart**: single smooth editorial line in primary forest green, ~2px stroke, rounded ends. The line is one continuous curve from the user's earliest reading on the left through "today" and into the projection on the right. **No dashed split, no confidence band, no threshold line, no data-point markers.** Subtle 1px vertical axis line on the far left at low opacity.
+   - **X-axis row**: three labels in Manrope body-sm, on-surface-muted: leftmost is `Today`, middle is the midpoint date (e.g., `May 4`), rightmost is the projected runout date (e.g., `May 8`). Below the row: a thin 1px separator at 8% forest opacity.
+   - **Legend row**: `○ Actual    — Projected` in Manrope body-sm, on-surface-variant. The Actual marker is a small outlined circle; the Projected marker is a short forest line segment.
+   - The **insufficient-data variant** still applies: when `< 4 readings`, the line is rendered only for the historical portion, the status word becomes "Learning", and the legend shows only `○ Actual`.
 4. **Status row**: sage chip "Sensor connected" with a forest dot · right-aligned "Last reading 2h ago" (Manrope body-sm).
 5. **Read now** button (filled forest, full width, all-caps).
 6. **Auto-reorder on** toggle row (sage pill background, label all-caps, switch on the right).
