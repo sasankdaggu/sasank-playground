@@ -137,7 +137,7 @@ dependencies = [
     "fastapi==0.115.0",
     "uvicorn[standard]==0.30.6",
     "sqlalchemy[asyncio]==2.0.36",
-    "asyncpg==0.29.0",
+    "asyncpg==0.30.0",
     "alembic==1.13.3",
     "pydantic-settings==2.5.2",
     "celery[redis]==5.4.0",
