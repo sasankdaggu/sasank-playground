@@ -1335,6 +1335,315 @@ git commit -m "feat: forecasting service — consumption rate and run-out predic
 
 ---
 
+### Task 8: Prophet forecast graph API
+
+**Files:**
+- Modify: `backend/pyproject.toml` — add `prophet`
+- Create: `backend/app/services/prophet_forecast.py`
+- Create: `backend/app/schemas/forecast.py`
+- Create: `backend/app/routers/forecast.py`
+- Modify: `backend/app/main.py`
+- Create: `backend/tests/test_forecast.py`
+
+- [ ] **Step 1: Add Prophet dependency**
+
+In `backend/pyproject.toml`, add `"prophet==1.1.5"` to the `dependencies` list:
+```toml
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.6",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.29.0",
+    "alembic==1.13.3",
+    "pydantic-settings==2.5.2",
+    "celery[redis]==5.4.0",
+    "prophet==1.1.5",
+]
+```
+
+Then install:
+```bash
+cd /Users/sdagguba/kibble-reorder/backend
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Expected: `prophet` installs with no errors. Prophet requires `pystan` and `cmdstanpy` — these install automatically as dependencies.
+
+- [ ] **Step 2: Write failing tests**
+
+Create `backend/tests/test_forecast.py`:
+```python
+import pytest
+from datetime import datetime, timedelta
+from app.services.prophet_forecast import build_prophet_forecast, ForecastResult
+
+def make_level_readings(start_pct: float, rate_per_day: float, days: int, readings_per_day: int = 4) -> list[tuple[datetime, float]]:
+    """Generates synthetic readings: level drops by rate_per_day each day."""
+    start = datetime(2024, 1, 1, 6, 0)
+    interval_hours = 24 / readings_per_day
+    readings = []
+    for i in range(days * readings_per_day):
+        t = start + timedelta(hours=i * interval_hours)
+        level = max(0.0, start_pct - (i / readings_per_day) * rate_per_day)
+        readings.append((t, level))
+    return readings
+
+def test_forecast_returns_result_with_sufficient_data():
+    readings = make_level_readings(start_pct=80.0, rate_per_day=5.0, days=7)
+    result = build_prophet_forecast(readings, reorder_threshold_pct=20, forecast_days=30)
+    assert result.status == "ok"
+    assert len(result.forecast) > 0
+    assert result.predicted_empty_date is not None
+    assert result.predicted_reorder_date is not None
+
+def test_forecast_reorder_date_before_empty_date():
+    readings = make_level_readings(start_pct=80.0, rate_per_day=5.0, days=7)
+    result = build_prophet_forecast(readings, reorder_threshold_pct=20, forecast_days=30)
+    assert result.status == "ok"
+    assert result.predicted_reorder_date < result.predicted_empty_date
+
+def test_forecast_insufficient_data():
+    readings = make_level_readings(start_pct=80.0, rate_per_day=5.0, days=0, readings_per_day=4)[:3]
+    result = build_prophet_forecast(readings, reorder_threshold_pct=20, forecast_days=30)
+    assert result.status == "insufficient_data"
+    assert result.forecast == []
+
+def test_forecast_points_have_required_fields():
+    readings = make_level_readings(start_pct=80.0, rate_per_day=5.0, days=7)
+    result = build_prophet_forecast(readings, reorder_threshold_pct=20, forecast_days=30)
+    assert result.status == "ok"
+    point = result.forecast[0]
+    assert hasattr(point, "timestamp")
+    assert hasattr(point, "level_pct")
+    assert hasattr(point, "level_pct_lower")
+    assert hasattr(point, "level_pct_upper")
+    assert hasattr(point, "is_historical")
+```
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+```bash
+pytest tests/test_forecast.py -v
+```
+
+Expected: FAIL — `prophet_forecast` module not found.
+
+- [ ] **Step 4: Implement Prophet forecast service**
+
+Create `backend/app/services/prophet_forecast.py`:
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+import pandas as pd
+from prophet import Prophet
+
+@dataclass
+class ForecastPoint:
+    timestamp: datetime
+    level_pct: float
+    level_pct_lower: float
+    level_pct_upper: float
+    is_historical: bool
+
+@dataclass
+class ForecastResult:
+    status: str  # "ok" | "insufficient_data"
+    forecast: list[ForecastPoint] = field(default_factory=list)
+    predicted_reorder_date: datetime | None = None
+    predicted_empty_date: datetime | None = None
+    reorder_threshold_pct: int = 20
+
+MIN_READINGS = 4
+
+def build_prophet_forecast(
+    readings: list[tuple[datetime, float]],
+    reorder_threshold_pct: int,
+    forecast_days: int = 30,
+) -> ForecastResult:
+    """
+    readings: list of (timestamp, kibble_level_pct) sorted oldest-first, refill events excluded.
+    Returns a ForecastResult with historical + future forecast points.
+    """
+    if len(readings) < MIN_READINGS:
+        return ForecastResult(status="insufficient_data")
+
+    df = pd.DataFrame(readings, columns=["ds", "y"])
+    df["ds"] = pd.to_datetime(df["ds"])
+    df["y"] = df["y"].clip(0.0, 100.0)
+
+    model = Prophet(
+        daily_seasonality=False,
+        weekly_seasonality=True,
+        yearly_seasonality=False,
+        uncertainty_samples=200,
+    )
+    model.fit(df)
+
+    future = model.make_future_dataframe(periods=forecast_days * 4, freq="6h")
+    forecast_df = model.predict(future)
+    forecast_df["yhat"] = forecast_df["yhat"].clip(0.0, 100.0)
+    forecast_df["yhat_lower"] = forecast_df["yhat_lower"].clip(0.0, 100.0)
+    forecast_df["yhat_upper"] = forecast_df["yhat_upper"].clip(0.0, 100.0)
+
+    historical_timestamps = set(df["ds"].dt.floor("min").tolist())
+
+    points = [
+        ForecastPoint(
+            timestamp=row["ds"].to_pydatetime(),
+            level_pct=round(row["yhat"], 2),
+            level_pct_lower=round(row["yhat_lower"], 2),
+            level_pct_upper=round(row["yhat_upper"], 2),
+            is_historical=row["ds"].floor("min") in historical_timestamps,
+        )
+        for _, row in forecast_df.iterrows()
+    ]
+
+    future_points = [p for p in points if not p.is_historical]
+    predicted_reorder_date = next(
+        (p.timestamp for p in future_points if p.level_pct <= reorder_threshold_pct), None
+    )
+    predicted_empty_date = next(
+        (p.timestamp for p in future_points if p.level_pct <= 0.5), None
+    )
+
+    return ForecastResult(
+        status="ok",
+        forecast=points,
+        predicted_reorder_date=predicted_reorder_date,
+        predicted_empty_date=predicted_empty_date,
+        reorder_threshold_pct=reorder_threshold_pct,
+    )
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+pytest tests/test_forecast.py -v
+```
+
+Expected: all 4 tests PASS. Note: Prophet model fitting takes ~2–5 seconds per test run — this is normal.
+
+- [ ] **Step 6: Create forecast schema and router**
+
+Create `backend/app/schemas/forecast.py`:
+```python
+from datetime import datetime
+from pydantic import BaseModel
+
+class ForecastPoint(BaseModel):
+    timestamp: datetime
+    level_pct: float
+    level_pct_lower: float
+    level_pct_upper: float
+    is_historical: bool
+
+class ForecastResponse(BaseModel):
+    status: str
+    reorder_threshold_pct: int
+    predicted_reorder_date: datetime | None
+    predicted_empty_date: datetime | None
+    forecast: list[ForecastPoint]
+```
+
+Create `backend/app/routers/forecast.py`:
+```python
+import uuid
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.database import get_db
+from app.models.bin import Bin
+from app.models.sensor_reading import SensorReading
+from app.models.user import User
+from app.schemas.forecast import ForecastResponse, ForecastPoint
+from app.services.prophet_forecast import build_prophet_forecast
+
+router = APIRouter()
+
+@router.get("/bins/{bin_id}/forecast", response_model=ForecastResponse)
+async def get_forecast(bin_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    bin_ = await db.get(Bin, bin_id)
+    if not bin_:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    if bin_.calibration_state != "fully_calibrated":
+        return ForecastResponse(
+            status="insufficient_data",
+            reorder_threshold_pct=20,
+            predicted_reorder_date=None,
+            predicted_empty_date=None,
+            forecast=[],
+        )
+
+    user = await db.get(User, bin_.user_id)
+    readings_rows = await db.scalars(
+        select(SensorReading)
+        .where(
+            SensorReading.bin_id == bin_id,
+            SensorReading.kibble_level_pct.is_not(None),
+            SensorReading.is_refill_event.is_(False),
+        )
+        .order_by(SensorReading.timestamp.asc())
+    )
+    readings = [(r.timestamp, r.kibble_level_pct) for r in readings_rows.all()]
+
+    result = build_prophet_forecast(readings, reorder_threshold_pct=user.reorder_threshold_pct)
+
+    return ForecastResponse(
+        status=result.status,
+        reorder_threshold_pct=result.reorder_threshold_pct,
+        predicted_reorder_date=result.predicted_reorder_date,
+        predicted_empty_date=result.predicted_empty_date,
+        forecast=[
+            ForecastPoint(
+                timestamp=p.timestamp,
+                level_pct=p.level_pct,
+                level_pct_lower=p.level_pct_lower,
+                level_pct_upper=p.level_pct_upper,
+                is_historical=p.is_historical,
+            )
+            for p in result.forecast
+        ],
+    )
+```
+
+- [ ] **Step 7: Register forecast router in main.py**
+
+Replace `backend/app/main.py` with:
+```python
+from fastapi import FastAPI
+from app.routers.users import router as users_router
+from app.routers.ingest import router as ingest_router
+from app.routers.forecast import router as forecast_router
+
+app = FastAPI(title="Kibble Reorder API")
+app.include_router(users_router)
+app.include_router(ingest_router)
+app.include_router(forecast_router)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+- [ ] **Step 8: Run full test suite**
+
+```bash
+pytest tests/ -v
+```
+
+Expected: all tests PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+cd /Users/sdagguba/kibble-reorder/backend
+git add app/services/prophet_forecast.py app/schemas/forecast.py app/routers/forecast.py app/main.py backend/pyproject.toml tests/test_forecast.py
+git commit -m "feat: Prophet forecast graph API — level prediction with reorder and empty dates"
+```
+
+---
+
 ## What comes next
 
 - **Plan 2 — Android App:** BLE foreground service (MokoSmart SDK), all screens, FCM notifications, sends readings to `/bins/{id}/readings`

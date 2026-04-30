@@ -154,6 +154,15 @@ Runs as an **Android foreground service** (required for reliable background BLE 
   3. Real-time check right before placing an order — always fresh, never cached
 - In-app delivery estimate tool queries this live; results cached per pincode × retailer for 24 hours
 
+**Forecast Graph Service (Prophet)**
+- Uses Facebook Prophet to model kibble level % over time
+- Trained on historical sensor readings for the bin, excluding refill events
+- Forecasts 30 days forward; outputs predicted level % with upper/lower confidence bands
+- Identifies two key dates from the forecast: predicted reorder date (when forecast crosses reorder threshold %) and predicted empty date (when forecast hits 0%)
+- Endpoint: `GET /bins/{bin_id}/forecast` — returns historical readings + Prophet forecast series + reorder threshold + predicted reorder date + predicted empty date
+- Android app renders this as a time series graph: historical line, forecast line with confidence band, horizontal dashed line at threshold %, vertical markers for reorder date and empty date
+- Requires at least 4 readings (1 day of data) to produce a forecast; returns `insufficient_data` status otherwise
+
 ---
 
 ## Retailer Plugins
