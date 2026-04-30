@@ -161,7 +161,8 @@ Runs as an **Android foreground service** (required for reliable background BLE 
 - Identifies two key dates from the forecast: predicted reorder date (when forecast crosses reorder threshold %) and predicted empty date (when forecast hits 0%)
 - Endpoint: `GET /bins/{bin_id}/forecast` — returns historical readings + Prophet forecast series + reorder threshold + predicted reorder date + predicted empty date
 - Android app renders this as a time series graph: historical line, forecast line with confidence band, horizontal dashed line at threshold %, vertical markers for reorder date and empty date
-- Requires at least 4 readings (1 day of data) to produce a forecast; returns `insufficient_data` status otherwise
+- Requires at least 4 readings (1 day of data) to produce a forecast; returns `insufficient_data` status with empty forecast list otherwise
+- Android app handles `insufficient_data` gracefully: shows only the historical data points collected so far, hides the forecast line and confidence band, and omits the predicted date markers — no error shown to the user
 
 ---
 
