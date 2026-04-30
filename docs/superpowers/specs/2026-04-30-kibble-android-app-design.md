@@ -1,0 +1,363 @@
+# Kibble Reorder — Android App Design (Plan 2)
+
+**Date:** 2026-04-30
+**Project:** Kibble Auto-Reorder System
+**Plan:** 2 of 4 (Android App)
+**Backend dependency:** Plan 1 (complete) + new auth, retailer-session, and quiet-hours endpoints added in Plan 2 (see Section 13)
+
+This spec covers the Android client. It assumes the Plan 1 backend is live and all Plan 1 endpoints work as documented in the parent design spec (`2026-04-30-kibble-reorder-design.md`).
+
+---
+
+## 1. Goals
+
+Build a production-quality Android app that:
+1. Onboards a new user end-to-end across all 9 setup steps
+2. Reads the MokoSmart S02R BLE sensor on a 6-hour cadence and on demand
+3. Pushes readings to the backend, observes forecast results, and displays bin status
+4. Handles low-stock notifications via FCM
+5. Maintains all 9 onboarding steps as functional UI (steps 1–7 fully wired to Plan 1 + Plan 2 auth; step 8 wired to a new Plan 2 retailer-session endpoint; step 9 wired to a Plan 3 endpoint that returns a clear "not yet available" state until Plan 3 ships)
+6. Ships with the architectural discipline of a startup-ready codebase: multi-module Gradle, MVVM with unidirectional data flow, strict layering
+
+## 2. Non-Goals
+
+- Order placement UI (Plans 3 and 4)
+- Live deal comparison (Plan 3)
+- Checkout automation (Plan 4)
+- Instrumented UI tests
+- iOS or web clients
+
+## 3. Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Language | Kotlin 2.0+ |
+| Auth | Firebase Auth (email + phone OTP) → Android sends Firebase ID token in `Authorization: Bearer` header → backend verifies via Firebase Admin SDK and resolves to internal `user_id` |
+| UI | Jetpack Compose + Material 3 |
+| Architecture pattern | MVVM with unidirectional data flow (immutable state + sealed-class intents). Not full redux-style MVI — no central reducer; ViewModels handle their own state transitions. |
+| State | Kotlin Coroutines + StateFlow |
+| Navigation | Jetpack Navigation Compose |
+| DI | Hilt with KSP (not KAPT — KAPT has friction across modules) |
+| Networking | Retrofit + OkHttp + Kotlinx Serialization |
+| Local database | Room (with Flow returning DAOs) |
+| BLE | MokoSmart S02R Android SDK |
+| Background | Foreground Service + WorkManager |
+| Push | Firebase Cloud Messaging |
+| Testing | JUnit 5 for JVM unit tests (ViewModels, Repositories, BLE service logic), MockK, Turbine, MockWebServer, in-memory Room. No instrumented tests in Plan 2. |
+| Build | Gradle 8+ with version catalogs (`libs.versions.toml`) and convention plugins in `build-logic/` for shared Compose/Hilt/coroutines config |
+| Theming | Material 3 with dynamic color (Android 12+); light + dark mode mandatory |
+| Accessibility | Content descriptions on all icons, semantic roles on interactive elements, supports system font scaling up to 200% |
+| Analytics | `Analytics` interface in `:core:common` with no-op default; concrete implementation deferred (PostHog/Mixpanel) |
+| Min SDK | 26 (Android 8.0) — required for stable BLE + foreground services |
+| Target SDK | 35 (Android 15) |
+
+## 4. Module Structure
+
+```
+:app                     — entry point, Application class, NavHost, Hilt root, bottom nav shell
+:core:network            — Retrofit client, KibbleApi interface, auth interceptor, DTOs
+:core:database           — Room database, DAOs, entities
+:core:ui                 — shared Compose components, Material 3 theme, typography, colors
+:core:common             — shared models, Result types, date utilities
+:feature:onboarding      — 9-step onboarding flow (screens + ViewModels + state)
+:feature:home            — bin dashboard, BLE status, Prophet graph
+:feature:orders          — order history + placeholder deal comparison (stubs in Plan 2)
+:feature:settings        — all settings screens
+:service:ble             — BLE foreground service, MokoSmart SDK integration, sync worker
+```
+
+### Dependency Rules
+
+- Feature modules depend on `:core:*` only — never on each other
+- `:app` depends on all feature modules to wire navigation
+- `:service:ble` depends on `:core:database` (writes readings) and `:core:network` (POSTs readings)
+- No circular dependencies
+- Each module has its own `build.gradle.kts` with explicit dependencies
+
+### Why Multi-Module From Day One
+
+Single-module is simpler today, but extracting modules out of a monolith later is painful — every cross-feature import becomes a hidden coupling that breaks the moment you split. Establishing module boundaries now is cheap; the build-time and ownership benefits compound as the team grows. This is the explicit "startup-ready" choice from brainstorming.
+
+## 5. State Pattern (MVVM with Unidirectional Data Flow)
+
+Every screen has the same four pieces:
+
+1. **`State`** — immutable data class. All UI state. Example:
+   ```kotlin
+   data class HomeState(
+       val bin: Bin? = null,
+       val latestReading: SensorReading? = null,
+       val forecast: ForecastResult? = null,
+       val bleStatus: BleStatus = BleStatus.DISCONNECTED,
+       val isLoading: Boolean = false,
+       val error: String? = null,
+   )
+   ```
+2. **`Intent`** — sealed class of user actions:
+   ```kotlin
+   sealed class HomeIntent {
+       data object OnTapReadNow : HomeIntent()
+       data class OnToggleAutoOrder(val enabled: Boolean) : HomeIntent()
+       data object OnRefreshForecast : HomeIntent()
+   }
+   ```
+3. **`ViewModel`** — receives intents, mutates a `MutableStateFlow<State>`, exposes a read-only `StateFlow<State>`.
+4. **Compose screen** — observes state with `collectAsStateWithLifecycle()`, emits intents through a single `(intent: HomeIntent) -> Unit` callback.
+
+This makes every screen read the same way. Code reviews are faster because the shape never varies.
+
+## 6. Navigation
+
+Single Activity (`MainActivity`). Two NavGraph roots:
+
+- **`OnboardingGraph`** — linear 9-step flow. Entry: `OnboardingActivity` is launched from `MainActivity` if `User.onboardingComplete == false`. Each step is its own destination; back stack pops normally; on completion, `User.onboardingComplete = true` is persisted and the user is sent to `MainGraph`.
+- **`MainGraph`** — bottom nav with three tabs: Home, Orders, Settings. Each tab has its own nested NavGraph for drill-downs.
+
+The Compose `NavHost` handles all transitions; no manual fragment management. Bottom nav is a Compose `NavigationBar` rendered in `:app`.
+
+## 7. BLE Service
+
+Implemented in `:service:ble` as a started foreground service.
+
+### Lifecycle
+
+- Started by `MainActivity` after onboarding completes
+- Survives app being backgrounded
+- Persists a "Kibble monitor active" notification (required for foreground service)
+- Stops only on user opt-out from Settings or device reboot
+
+### Read Cadence
+
+- WorkManager schedules a periodic `BleReadWorker` every 6 hours
+- "Read now" button on Home triggers an immediate one-shot read (sends a broadcast that the service handles)
+
+### Read Flow
+
+1. WorkManager fires → service connects to MokoSmart S02R via the SDK
+2. SDK returns distance reading in mm
+3. Service writes a `SensorReading` row to Room with `synced=false`
+4. Service POSTs to `/bins/{bin_id}/readings`
+5. On 200 response, mark row `synced=true`
+6. On failure, leave `synced=false`; `SyncWorker` retries on connectivity change
+
+### Why Room as the Bridge
+
+UI never talks to the service. UI observes Room (`Flow<SensorReading>`). Service writes to Room. This decouples the two completely:
+- Service can be tested without UI
+- UI can be previewed and tested without BLE hardware
+- Offline-first: app shows last reading even with no connectivity
+
+## 8. Data Layer
+
+### Network (`:core:network`)
+
+- `KibbleApi` Retrofit interface mirrors backend endpoints
+- `AuthInterceptor` reads the current Firebase ID token (refreshing if expired via Firebase SDK) and injects it as `Authorization: Bearer <token>` on every request
+- `KibbleApiClient` builds the OkHttp + Retrofit instance
+- All DTOs use Kotlinx Serialization
+- Repositories convert DTOs to domain models defined in `:core:common`
+
+### Database (`:core:database`)
+
+Entities:
+- `User` (id, firebaseUid, email, name, pincode, prefs, onboardingComplete, quietHoursStart, quietHoursEnd, quietHoursTz)
+- `Dog` (id, userId, name, breed, kibbleBrand, kibbleProduct)
+- `Bin` (id, userId, dogId, capacityKg, calibrationState, emptyMm, fullMm)
+- `SensorReading` (id, binId, distanceMm, timestamp, synced)
+- `Order` (id, binId, retailer, packKg, priceInr, status, placedAt)
+- `RetailerSession` (id, userId, retailer, type, expiresAt, source) — local mirror of backend session metadata; the encrypted blob lives only on the backend. `type` is `cookie | credentials`. `source` is `ONBOARDING | CHECKOUT_PROMPT | SETTINGS_ADD`.
+
+DAOs expose `Flow<T>` queries so screens automatically re-render when data changes.
+
+### Repository Pattern
+
+Each domain area has a repository:
+- `UserRepository`, `DogRepository`, `BinRepository`, `ReadingRepository`, `ForecastRepository`, `RetailerSessionRepository`
+
+Repository contract: reads come from Room (instant, offline-capable); writes go to backend first, then Room on success. Network errors surface as a `Result.Failure` for the ViewModel to render. Repositories are the single seam between domain layer and infrastructure.
+
+## 9. Onboarding (9 Steps)
+
+| # | Step | Backend dependency | Plan 2 status |
+|---|---|---|---|
+| 1 | Account: Firebase login (email/phone OTP) → name + pincode entry | `POST /auth/firebase` (provisions user) → `PATCH /users/me` (name + pincode) | Fully wired |
+| 2 | Dog profile: name, breed, kibble brand & product | `POST /users/{id}/dogs` | Fully wired |
+| 3 | Container capacity (kg) | `POST /users/{id}/bins` | Fully wired |
+| 4 | Empty calibration (tap "Set empty level") | `POST /bins/{id}/calibrate-empty` | Fully wired |
+| 5 | Pack size preference (3kg/5kg/10kg/Best value) | `PATCH /users/{id}` | Fully wired |
+| 6 | Reorder threshold (slider) | `PATCH /users/{id}` | Fully wired |
+| 7 | Payment mode (90% or 100% autonomous) | `PATCH /users/{id}` | Fully wired |
+| 8 | **Preferred retailer login only** — pick one preferred retailer + log in (cookies or credentials per retailer policy) | `POST /users/{id}/retailer-sessions` (NEW endpoint added in Plan 2) | Fully wired |
+| 9 | Delivery estimate check by pincode (preferred retailer only at this step) | `GET /users/{id}/delivery-estimates` (Plan 3) | UI built; shows "Checking retailers..." then a clear "Delivery info available once Plan 3 is live — tap Skip to continue" state |
+
+### Step 8 Detail — Preferred Retailer Login (Onboarding)
+
+Onboarding asks the user to log into **one** preferred retailer only. Additional retailers are added incrementally at checkout time (see Section 10 — Incremental Retailer Login).
+
+**Flow:**
+
+1. User is shown a list of supported retailers grouped by category:
+   - **Marketplace:** Amazon.in
+   - **Pet specialists:** Supertails, HUFT
+   - **Quick commerce:** Blinkit, Zepto, Swiggy Instamart
+   - **D2C brands:** Henlo, Drools direct, Pawlicious, etc.
+2. User picks one as their preferred retailer
+3. App routes them to the appropriate login flow per retailer category (see below)
+4. On success, session is POST'd to `/users/{id}/retailer-sessions`; backend encrypts and stores
+5. User proceeds to step 9
+
+### Per-Retailer Login Flow (Hybrid)
+
+Different retailers need different login mechanisms because of their anti-bot postures:
+
+| Retailer category | Login flow | Why |
+|---|---|---|
+| **D2C brands** (Henlo, Drools, Pawlicious, etc.) | WebView cookie capture | Typically Shopify/WooCommerce — sessions replay reliably from cloud scrapers |
+| **Pet specialists** (Supertails, HUFT) | WebView cookie capture | Standard e-commerce stacks; cookies usually portable |
+| **Marketplace** (Amazon.in) | Credential entry → server-side login per session | Amazon binds sessions to device fingerprint + IP class; cookie replay fails |
+| **Quick commerce** (Blinkit, Zepto, Swiggy Instamart) | Credential entry → server-side login per session | Aggressive anti-bot; cookie replay fails reliably |
+
+**WebView capture:** in-app `WebView` loads the retailer login page. JS bridge reads cookies after successful login. Cookies + retailer name posted to backend. Stored encrypted.
+
+**Credential entry:** native form (email/phone + password). Credentials posted to backend over TLS. Backend stores credentials in encrypted vault (AES-256-GCM with key from env var; same encryption used for session blobs). Scraper logs in fresh per scrape session — never replays a stored cookie. User can revoke credentials any time from Settings.
+
+**Important UX note:** the credential flow needs explicit trust framing — "We'll use these credentials only to check prices and place orders you approve. Stored encrypted. You can revoke any time." Per-retailer consent screen before the credential form.
+
+The new backend endpoint `POST /users/{id}/retailer-sessions` accepts both shapes:
+- `{ retailer, type: "cookie", session_blob: <encrypted>, expires_at }`
+- `{ retailer, type: "credentials", credentials_blob: <encrypted> }`
+
+D2C order placement also requires login — D2C is "easier on cookies" than Amazon, but D2C scrapers still need authenticated sessions to place orders. Same retailer-sessions table holds both.
+
+## 9.5. Incremental Retailer Login (Plan 4 hook, designed in Plan 2)
+
+The app does not ask users to log into all retailers upfront. Onboarding logs into one preferred retailer; the remaining retailers are added on-demand at checkout time (Plan 4) when the deal-finder discovers a better deal at an unconfigured retailer.
+
+**Why this matters in Plan 2:**
+- The onboarding UI must be designed for a single-retailer pick (not a multi-select grid)
+- The Settings screen must support adding/removing retailers any time
+- Backend endpoint `POST /users/{id}/retailer-sessions` is built once; reused at onboarding and again at checkout time
+- The `RetailerSession` Room entity carries a `source: ONBOARDING | CHECKOUT_PROMPT` field to track how each session was captured (useful for future analytics)
+
+**Plan 4 will use it like this** (out of scope for Plan 2, but the seam exists):
+> "We found 5kg of [brand] at HUFT for ₹150 less than your default. Log in to HUFT to capture this deal?" → tap → routes through the same per-retailer login flow as onboarding step 8 → session stored → order proceeds.
+
+In Plan 2, the only consumer of this UX is the Settings screen "Add another retailer" button, which exercises the full flow end-to-end.
+
+## 10. Screens
+
+### Home
+- Animated kibble bin illustration with fill % matching latest reading
+- "Last updated: 2h ago" timestamp
+- "Days remaining: 12" + "Next predicted order: May 12"
+- Prophet forecast graph (historical + forecast band) — gracefully shows historical only when `status=insufficient_data`
+- BLE connection chip (connected / disconnected / scanning)
+- "Read now" button (triggers immediate BLE read)
+- Auto-order toggle (Plan 2: visible but with a "Auto-order coming with Plan 3" tooltip on tap)
+
+### Orders
+- Stub current-deal card: "Auto-order activates after Plan 3 ships — your sensor data is being collected in the meantime"
+- Placeholder section for future deal comparison table
+- Past orders list (empty until Plan 4 places real orders)
+
+### Settings
+- Reorder threshold (slider with backend-recommended value highlighted)
+- Payment mode (90% / 100%)
+- Pack size preference
+- Deal criteria: minimum seller rating, pinned retailer, blacklisted retailers (UI built; values stored on `User` for Plan 3)
+- Manage retailer sessions: list of currently logged-in retailers with expiry, "Add another retailer" button (exercises the per-retailer login flow from onboarding step 8), re-login when expired, revoke credentials
+- Notification preferences
+
+## 11. Notifications (FCM)
+
+In Plan 2, two notification types are wired:
+
+- **Low-stock alert** — triggered server-side when a forecast crosses the user's reorder threshold. Body: "Your kibble is at 18% — Buddy has ~5 days left."
+- **BLE connection lost** — triggered locally if the foreground service can't reach the sensor for 24 hours. Body: "Sensor not responding — tap to troubleshoot."
+
+Order-related notifications (placed, shipped, delivered) are deferred to Plan 4.
+
+### Quiet Hours (India default)
+
+Default quiet window: 10pm–8am IST. Notifications scheduled within this window are deferred to 8am the next day. Settings exposes a per-user override. Backend honors the user's `quiet_hours_start` and `quiet_hours_end` fields; on-device fallback if backend doesn't yet support it.
+
+## 12. Testing Strategy
+
+| Layer | Tooling | Target |
+|---|---|---|
+| ViewModels | JUnit 5 + Turbine + MockK | Every intent → state transition |
+| Repositories | JUnit 5 + in-memory Room + MockWebServer | Happy path + network failure paths |
+| DAOs | androidx.room.testing | Schema migrations + queries |
+| BLE service | JUnit 5 + fake MokoSmart SDK + in-memory Room | Scheduling, parsing, sync retry |
+| Compose previews | Compose `@Preview` | Visual sanity per screen |
+| Instrumented UI tests | None in Plan 2 | Add Maestro flows in a later plan |
+
+Coverage target: 80% on ViewModels and Repositories. BLE service tests must cover both success and failure paths (no signal, malformed reading, network down during sync).
+
+## 13. New Plan 2 Backend Work
+
+The Android app needs new backend endpoints that weren't in Plan 1:
+
+### Authentication
+
+**`POST /auth/firebase`**
+- Body: `{ firebase_id_token: string }`
+- Response: `200` with `{ user_id, is_new_user }`
+- Backend verifies the Firebase ID token via Firebase Admin SDK; on first login, provisions a new `users` row keyed by Firebase UID; returns the internal `user_id`. Subsequent calls resolve the same `user_id`.
+- Adds `firebase_uid` column to `users` table (nullable for backward compat with existing rows from Plan 1; migration provided).
+- All other endpoints now require `Authorization: Bearer <firebase_id_token>` header. A FastAPI dependency verifies the token and injects the resolved `user_id` into the request — replacing the path-parameter `user_id` pattern from Plan 1 where appropriate. (Existing `POST /users` from Plan 1 is removed/replaced; user provisioning now happens on first Firebase login.)
+
+### Retailer sessions
+
+**`POST /users/{user_id}/retailer-sessions`**
+- Body for cookie capture: `{ retailer: string, type: "cookie", session_blob: string (encrypted), expires_at: ISO8601 }`
+- Body for credential entry: `{ retailer: string, type: "credentials", credentials_blob: string (encrypted) }`
+- Response: `201` with `{ id, retailer, type, expires_at? }`
+- Storage: new `retailer_sessions` table (id, user_id, retailer, type, encrypted_blob, expires_at?, source, created_at, updated_at)
+- Encryption: server-side AES-256-GCM with a key from env var (`RETAILER_SECRET_KEY`)
+- `source`: enum `ONBOARDING | CHECKOUT_PROMPT | SETTINGS_ADD` for analytics
+
+**`GET /users/{user_id}/retailer-sessions`**
+- Returns list of `{ retailer, type, expires_at, is_expired }` for Settings screen rendering. Never returns the encrypted blob.
+
+**`DELETE /users/{user_id}/retailer-sessions/{retailer}`**
+- Revokes a stored session/credential. Used by Settings → "Remove retailer."
+
+### User preferences
+
+**`PATCH /users/{user_id}/quiet-hours`**
+- Body: `{ start: "HH:MM", end: "HH:MM", timezone: string }`
+- Used by Settings → notification preferences. Backend honors these when scheduling FCM low-stock alerts.
+
+These endpoints + the new tables + Alembic migrations are part of Plan 2's scope, executed in the backend repo (`/Users/sdagguba/kibble-reorder/backend`).
+
+## 14. Risks and Open Questions
+
+### Resolved decisions
+
+- **Auth: Firebase Auth.** Android handles email + phone OTP via Firebase. App sends Firebase ID token in `Authorization: Bearer` header. Backend verifies via Firebase Admin SDK and resolves to internal `user_id`. Plan 1 user-provisioning endpoint is replaced by `POST /auth/firebase` which provisions on first login.
+- **Retailer sessions: hybrid + incremental.** Cookie capture for D2C and pet specialists (Shopify-backed, replay reliably). Credential entry for Amazon and quick commerce (anti-bot binds sessions to device + IP). Onboarding asks for one preferred retailer only; remaining retailers added incrementally at checkout time when a better deal is found elsewhere.
+
+### Operational
+
+- **MokoSmart SDK quality:** unknown until integration begins. If the SDK is unstable, fallback is the Android `BluetoothLeScanner` API directly with manual GATT parsing.
+- **WebView cookie capture per retailer:** each retailer's login flow differs (some use OAuth redirect, some have anti-bot). Step 8 needs per-retailer adapters in `:feature:onboarding`.
+- **FCM topic vs. token:** Plan 2 will use device tokens (one-to-one). Topic-based broadcast is YAGNI for a personal app.
+- **Plan 3 endpoint contract:** step 9's delivery-estimate response shape must be agreed at Plan 3 time so the Android UI doesn't need a rewrite.
+- **Hilt scoping across modules:** every `@HiltViewModel` must be in a feature module that includes the Hilt Gradle plugin; `:core:*` modules expose `@Module @InstallIn(SingletonComponent::class)` bindings.
+
+## 15. Plan 2 Definition of Done
+
+- Firebase Auth integrated; new users provision via `POST /auth/firebase`; all backend calls authenticated
+- All 9 onboarding steps render and progress; steps 1–8 are fully functional (step 8 = preferred retailer login only, with hybrid cookie/credential flow per retailer category); step 9 shows its "available after Plan 3" state cleanly
+- BLE service reads sensor every 6 hours and on demand
+- Home shows real bin %, last reading time, forecast graph, BLE status
+- Orders renders the stub state without errors
+- Settings persists all preferences via backend, supports adding/removing retailers via the same login flow as onboarding
+- FCM notifications fire for low stock and BLE timeout, honoring quiet hours
+- Light + dark theme both render correctly
+- Basic accessibility: all icons have content descriptions; system font scaling works to 200%
+- All ViewModels and Repositories have unit tests; coverage ≥ 80%
+- Modules build independently: `./gradlew :feature:home:test` works
+- New backend endpoints (`/auth/firebase`, `/retailer-sessions`, `/quiet-hours`) deployed and tested
+- App installs on a physical Android device and connects to a real MokoSmart S02R
