@@ -23,3 +23,10 @@ dist/
 build/
 .next/
 out/
+
+# Spike local artifacts (raw HTML, parsed JSON, reports) — regenerate on demand
+spike/data/
+spike/.env
+spike/.venv/
+spike/uv.lock
+backend/dev.db

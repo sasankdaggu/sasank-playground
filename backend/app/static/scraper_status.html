@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wand Scraper Status</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --card: #14171f;
+    --card-2: #1c2030;
+    --border: #2a2f3d;
+    --text: #e6e9ef;
+    --muted: #8b91a3;
+    --good: #2ecc71;
+    --bad: #e74c3c;
+    --neutral: #4a5060;
+    --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 48px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 32px 0 12px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .summary { display: flex; gap: 16px; margin-bottom: 32px; }
+  .summary .pill { padding: 10px 16px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); }
+  .summary .pill .num { font-weight: 700; font-size: 22px; margin-right: 8px; }
+  .summary .pill.up .num { color: var(--good); }
+  .summary .pill.down .num { color: var(--bad); }
+  .summary .pill.idle .num { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .card-title { font-weight: 600; font-size: 15px; }
+  .badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge.operational { background: rgba(46,204,113,0.15); color: var(--good); }
+  .badge.down { background: rgba(231,76,60,0.15); color: var(--bad); }
+  .badge.not_monitored { background: rgba(139,145,163,0.15); color: var(--muted); }
+  .badge.running { background: rgba(99,102,241,0.15); color: var(--accent); }
+  .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .uptime { color: var(--good); font-weight: 600; }
+  .history { display: flex; gap: 2px; height: 28px; }
+  .bar { flex: 1; border-radius: 2px; min-width: 4px; }
+  .bar.success { background: var(--good); }
+  .bar.partial { background: #f1c40f; }
+  .bar.failed { background: var(--bad); }
+  .bar.no_data, .bar.no_run { background: var(--neutral); opacity: 0.4; }
+  .bar.running { background: var(--accent); }
+  .bar:hover { opacity: 0.75; }
+  .group-grid { margin-bottom: 12px; }
+</style>
+</head>
+<body>
+  <h1>Wand Scraper Status</h1>
+  <p class="subtitle" id="updated">Loading…</p>
+  <div class="summary" id="summary"></div>
+  <div id="groups"></div>
+
+<script>
+async function load() {
+  const r = await fetch('/scraper-status');
+  const d = await r.json();
+
+  document.getElementById('updated').textContent =
+    `Updated ${new Date().toLocaleString()} · ${d.summary.total} scrapers tracked`;
+
+  const sum = d.summary;
+  document.getElementById('summary').innerHTML = `
+    <div class="pill up"><span class="num">${sum.operational}</span>Operational</div>
+    <div class="pill down"><span class="num">${sum.down}</span>Down</div>
+    <div class="pill idle"><span class="num">${sum.not_monitored}</span>Not Monitored</div>`;
+
+  const groups = {};
+  d.scrapers.forEach(s => {
+    (groups[s.group] = groups[s.group] || []).push(s);
+  });
+
+  const container = document.getElementById('groups');
+  container.innerHTML = '';
+  Object.entries(groups).forEach(([groupName, items]) => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'group-grid';
+    groupEl.innerHTML = `<h2>${groupName}</h2><div class="grid"></div>`;
+    const grid = groupEl.querySelector('.grid');
+    items.forEach(s => grid.appendChild(card(s)));
+    container.appendChild(groupEl);
+  });
+}
+
+function card(s) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  const uptimeText = s.uptime_30d == null ? '—' : `${s.uptime_30d}% uptime`;
+  const lastSuccess = s.last_success_at
+    ? `Last ok ${new Date(s.last_success_at).toLocaleDateString()}`
+    : 'Never succeeded';
+  const history = (s.history_30d || [])
+    .map(d => `<div class="bar ${d.status}" title="${d.date}: ${d.status}"></div>`)
+    .join('');
+  el.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">${s.label}</div>
+      <span class="badge ${s.status}">${s.status.replace('_',' ')}</span>
+    </div>
+    <div class="meta">
+      <span class="uptime">${uptimeText}</span>
+      <span>${lastSuccess}</span>
+    </div>
+    <div class="history">${history}</div>`;
+  return el;
+}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

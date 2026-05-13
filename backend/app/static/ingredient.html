@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wand · Ingredient</title>
+<style>
+  :root {
+    --bg: #0b0d12; --card: #14171f; --card-2: #1c2030;
+    --border: #2a2f3d; --text: #e6e9ef; --muted: #8b91a3;
+    --good: #2ecc71; --warn: #f1c40f; --bad: #e74c3c; --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:32px 48px; font-family:-apple-system,system-ui,sans-serif;
+         background:var(--bg); color:var(--text); min-height:100vh; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .search { display:flex; gap:8px; max-width:520px; margin-bottom:24px; }
+  .search input { flex:1; background:var(--card); color:var(--text);
+                  border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:14px; }
+  .results { background:var(--card); border:1px solid var(--border); border-radius:8px;
+             max-width:520px; max-height:300px; overflow-y:auto; display:none; }
+  .results.show { display:block; }
+  .result-item { padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .result-item:hover { background:var(--card-2); }
+  .result-item:last-child { border-bottom:0; }
+
+  h1 { margin: 0 0 4px; font-size: 30px; }
+  .common-name { color: var(--muted); margin-bottom: 24px; }
+  .badge { display:inline-block; padding:4px 10px; border-radius:999px;
+           font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
+  .b-superstar { background: rgba(46,204,113,0.2); color: var(--good); }
+  .b-goodie { background: rgba(46,204,113,0.15); color: var(--good); }
+  .b-icky { background: rgba(231,76,60,0.15); color: var(--bad); }
+  .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; max-width: 1100px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
+          padding:24px; margin-bottom:16px; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+             letter-spacing: 0.08em; color: var(--muted); }
+  .description { line-height: 1.6; }
+  .functions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .func-tag { padding: 4px 10px; border-radius: 999px; background: var(--card-2);
+              border: 1px solid var(--border); font-size: 12px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 14px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: SF Mono, monospace; }
+  .citations { display: flex; flex-direction: column; gap: 8px; }
+  .citation { display:flex; justify-content:space-between; align-items:center;
+              padding:10px 12px; background:var(--card-2); border-radius:8px; }
+  .citation .src { font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .confidence { font-size:14px; padding:8px 12px; background:var(--card-2);
+                border-radius:8px; display:inline-block; }
+  .product { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .product:last-child { border-bottom: 0; }
+  .product .brand { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+  <div class="search">
+    <input id="q" placeholder="Search any INCI ingredient (e.g. Niacinamide)…" autocomplete="off">
+  </div>
+  <div class="results" id="results"></div>
+  <div id="page" style="display:none">
+    <h1 id="name"></h1>
+    <p class="common-name" id="common"></p>
+    <div class="grid">
+      <div>
+        <div class="card" id="desc-card">
+          <h2>About</h2>
+          <div class="description" id="description"></div>
+        </div>
+        <div class="card">
+          <h2>What it does</h2>
+          <div class="functions" id="functions"></div>
+        </div>
+        <div class="card">
+          <h2>Identifiers</h2>
+          <div class="kv" id="ids"></div>
+        </div>
+        <div class="card">
+          <h2>Found in your products</h2>
+          <div id="products"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Confidence</h2>
+          <div class="confidence" id="confidence"></div>
+        </div>
+        <div class="card">
+          <h2>Sources & Citations</h2>
+          <div class="citations" id="citations"></div>
+        </div>
+        <div class="card" id="scores-card" style="display:none">
+          <h2>Safety scores</h2>
+          <div class="kv" id="scores"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const el = (id) => document.getElementById(id);
+
+let searchTimer;
+el('q').addEventListener('input', (ev) => {
+  clearTimeout(searchTimer);
+  const q = ev.target.value.trim();
+  if (q.length < 2) { el('results').classList.remove('show'); return; }
+  searchTimer = setTimeout(async () => {
+    const r = await fetch(`/ingredients/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    const box = el('results');
+    box.innerHTML = d.results.length
+      ? d.results.map(x =>
+          `<div class="result-item" data-id="${x.id}">
+             ${x.inci_name} ${x.id_rating ? `<span class="badge b-${x.id_rating}">${x.id_rating}</span>` : ''}
+           </div>`).join('')
+      : '<div class="result-item">No matches</div>';
+    box.classList.add('show');
+    box.querySelectorAll('.result-item').forEach(i =>
+      i.addEventListener('click', () => loadIngredient(i.dataset.id)));
+  }, 250);
+});
+
+async function loadIngredient(id) {
+  el('results').classList.remove('show');
+  const r = await fetch(`/ingredients/${id}`);
+  const d = await r.json();
+  const ing = d.ingredient;
+
+  el('name').textContent = capitalize(ing.inci_name) + (ing.id_rating ? '' : '');
+  el('name').innerHTML += ing.id_rating
+    ? ` <span class="badge b-${ing.id_rating}">${ing.id_rating}</span>` : '';
+  el('common').textContent = ing.common_name || '';
+
+  el('description').innerHTML = ing.description
+    ? ing.description + (ing.description_source
+        ? `<p style="color:var(--muted);font-size:12px;margin-top:12px;">— Source: ${ing.description_source}</p>` : '')
+    : '<span class="empty">No description scraped yet.</span>';
+
+  el('functions').innerHTML = (ing.functions || []).length
+    ? ing.functions.map(f => `<div class="func-tag">${f}</div>`).join('')
+    : '<span class="empty">No function tags yet.</span>';
+
+  el('ids').innerHTML = `
+    <div class="k">CAS #</div><div class="v">${ing.cas_number || '—'}</div>
+    <div class="k">EC #</div><div class="v">${ing.ec_number || '—'}</div>
+    <div class="k">CosIng Annex</div><div class="v">${ing.cosing_annex || '—'}</div>`;
+
+  // Confidence + citations
+  el('confidence').textContent = ing.confidence_score
+    ? `${Math.round(ing.confidence_score * 100)}% — ${(ing.sources_used || []).length} of 4 sources`
+    : 'No data sourced yet.';
+
+  const citations = ing.citation_urls || {};
+  el('citations').innerHTML = Object.keys(citations).length
+    ? Object.entries(citations).map(([src, url]) =>
+        `<div class="citation">
+           <span class="src">${src}</span>
+           <a href="${url}" target="_blank" rel="noopener">Open ↗</a>
+         </div>`).join('')
+    : '<span class="empty">Awaiting first scrape.</span>';
+
+  // Safety scores card
+  const hasScores = ing.ewg_hazard_low != null || ing.cosdna_acne != null || ing.cosdna_irritant != null;
+  if (hasScores) {
+    el('scores-card').style.display = 'block';
+    el('scores').innerHTML = `
+      ${ing.ewg_hazard_low != null
+        ? `<div class="k">EWG hazard</div><div class="v">${ing.ewg_hazard_low}${ing.ewg_hazard_high ? '–'+ing.ewg_hazard_high : ''} / 10</div>` : ''}
+      ${ing.cosdna_acne != null
+        ? `<div class="k">Comedogenic</div><div class="v">${ing.cosdna_acne} / 5</div>` : ''}
+      ${ing.cosdna_irritant != null
+        ? `<div class="k">Irritancy</div><div class="v">${ing.cosdna_irritant} / 5</div>` : ''}`;
+  }
+
+  el('products').innerHTML = (d.used_in_products || []).length
+    ? d.used_in_products.map(p =>
+        `<div class="product">${p.name}<div class="brand">${p.brand_name}</div></div>`).join('')
+    : '<span class="empty">Not found in any DB product yet.</span>';
+
+  el('page').style.display = 'block';
+}
+
+function capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
+
+// Optional: ?id=N deep link
+const urlId = new URLSearchParams(location.search).get('id');
+if (urlId) loadIngredient(urlId);
+</script>
+</body>
+</html>

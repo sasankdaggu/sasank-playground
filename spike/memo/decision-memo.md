@@ -19,9 +19,9 @@ The spike scraped 60 face skincare product pages across 7 retailers: 5 Shopify D
 
 ## 3. Key Findings
 
-### 3.1 Tira: All Fields Absent
+### 3.1 Tira: All Fields Absent (Corrected in Sprint 1)
 
-Tira returned 0% field presence across every structured field (brand_name, canonical_name, price, description, ingredients, rating — all absent). Root cause: Tira is a React/Next.js application that renders server-side data exclusively via `__NEXT_DATA__` JSON injection. The HTML DOM contains no product data; the extractor's CSS selector and JSON-LD strategies both fail. This is not a data availability problem — Tira's data is present but requires a Next.js-aware extraction path (`__NEXT_DATA__` parsing), which the v0 scraper_configs did not support.
+Tira returned 0% field presence during the spike because the spike's parser only tried JSON-LD and CSS selectors. Sprint 1 investigation revealed the actual root cause: Tira runs on the **Fynd** e-commerce platform (not Next.js), which embeds all product data in a `window.APP_DATA` JavaScript object in the page HTML. The data is fully present on initial load — no JS execution required. The Fynd extractor built in Sprint 1 achieves 10/10 name, 10/10 images, 7/10 price (3 products have price loaded via API call post-render). The `extraction_method = 'next_data'` schema delta is now `extraction_method = 'fynd_app_data'` instead.
 
 ### 3.2 Ingredients: 0% Across All Retailers
 

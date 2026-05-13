@@ -1,17 +1,45 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
+import structlog
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from spike.config import retailer_by_slug
 from spike.models import ParsedSample, RawCapture, Variant
 from spike.samplers.base import persist_parsed, persist_raw
 
-_FETCHER_VERSION = "spike-shopify-0.0.1"
+log = structlog.get_logger()
+_FETCHER_VERSION = "spike-shopify-0.0.2"
+
+
+def _scraperapi_proxy() -> str | None:
+    key = os.getenv("SCRAPERAPI_KEY")
+    if not key:
+        return None
+    return f"http://scraperapi:{key}@proxy-server.scraperapi.com:8001"
+
+
+@retry(
+    retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TransportError, httpx.TimeoutException)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    reraise=True,
+)
+async def _fetch_url(url: str) -> httpx.Response:
+    proxy = _scraperapi_proxy()
+    kwargs: dict = {"timeout": 60.0}
+    if proxy:
+        kwargs["proxy"] = proxy
+    async with httpx.AsyncClient(**kwargs) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp
 
 
 class ShopifySampler:
@@ -25,9 +53,9 @@ class ShopifySampler:
     async def sample(
         self, n: int, raw_dir: Path, parsed_dir: Path
     ) -> list[ParsedSample]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(self.retailer.products_json_url)
-            resp.raise_for_status()
+        via = "scraperapi" if _scraperapi_proxy() else "direct"
+        log.info("shopify_fetch", retailer=self.retailer.slug, via=via)
+        resp = await _fetch_url(self.retailer.products_json_url)
 
         rc = RawCapture(
             retailer_slug=self.retailer.slug,

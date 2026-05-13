@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wand
+      POSTGRES_PASSWORD: wand
+      POSTGRES_DB: wand_spike
+    ports:
+      - "5433:5432"
+    volumes:
+      - wand_spike_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wand -d wand_spike"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  wand_spike_pgdata:

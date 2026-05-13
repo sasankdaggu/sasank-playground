@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── Shelf theme backgrounds ───────────────────────────────────────────────── */
+
+.tile-bg {
+  background-color: #f8f9fa;
+  background-image:
+    linear-gradient(rgba(200, 200, 200, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 200, 200, 0.3) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.night-bg {
+  background-color: #0f172a;
+  background-image:
+    linear-gradient(rgba(51, 65, 85, 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(51, 65, 85, 0.4) 1px, transparent 1px);
+  background-size: 40px 40px;
+  color: #e2e8f0;
+}
+
+.neon-bg {
+  background: linear-gradient(135deg, #1e0a3c 0%, #0d0021 50%, #0a0a1f 100%);
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(192, 38, 211, 0.15) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 50%);
+  color: #f0abfc;
+}
+
+.retro-bg {
+  background-color: #020617;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.15) 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: #22d3ee;
+  font-family: "Courier New", monospace;
+  image-rendering: pixelated;
+}
+
+.garden-bg {
+  background-color: #fef3c7;
+  background-image:
+    radial-gradient(circle at 10% 90%, rgba(134, 239, 172, 0.4) 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(134, 239, 172, 0.3) 0%, transparent 40%),
+    linear-gradient(rgba(187, 247, 208, 0.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(187, 247, 208, 0.2) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+}
+
+.pastel-bg {
+  background: linear-gradient(160deg, #bfdbfe 0%, #ddd6fe 40%, #fbcfe8 100%);
+  background-image:
+    radial-gradient(ellipse at 30% 80%, rgba(255, 255, 255, 0.4) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 20%, rgba(255, 255, 255, 0.3) 0%, transparent 50%);
+}
+
+/* Neon glow effects */
+.neon-bg .shelf-plank {
+  box-shadow: 0 0 10px rgba(240, 171, 252, 0.4), 0 2px 8px rgba(0,0,0,0.5);
+}
+
+/* Retro pixel border */
+.retro-bg .shelf-plank {
+  border: 2px solid rgba(34, 211, 238, 0.5);
+  image-rendering: pixelated;
+}

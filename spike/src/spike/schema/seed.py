@@ -11,16 +11,17 @@ from pathlib import Path
 import psycopg
 import structlog
 
+from spike.config import retailer_by_slug
 from spike.models import ParsedSample
 
 log = structlog.get_logger()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://wand:wand@localhost:5433/wand_spike")
 SPIKE_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # spike/
 
 
 def _conn() -> psycopg.Connection:
-    dsn = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+    url = os.getenv("DATABASE_URL", "postgresql://wand:wand@localhost:5433/wand_spike")
+    dsn = url.replace("postgresql+psycopg://", "postgresql://")
     return psycopg.connect(dsn)
 
 
@@ -79,6 +80,11 @@ def seed_sample(
         log.warning("skipping_nameless_sample", url=ps.source_url)
         return
 
+    try:
+        retailer_cfg = retailer_by_slug(ps.retailer_slug)
+    except KeyError:
+        retailer_cfg = None
+
     with conn.cursor() as cur:
         # Brand — upsert by name.
         brand_name = ps.brand_name or ps.retailer_slug
@@ -87,6 +93,10 @@ def seed_sample(
             (brand_name,),
         )
         brand_id = cur.fetchone()[0]
+
+        image_priority = retailer_cfg.image_priority if retailer_cfg else 99
+        catalog_priority = retailer_cfg.catalog_priority if retailer_cfg else 99
+        can_create = retailer_cfg.can_create_canonical if retailer_cfg else True
 
         # Product — insert (allow duplicates across retailers for the spike).
         stock_status = "unknown"
@@ -100,23 +110,62 @@ def seed_sample(
                 stock_status = "in_stock"
 
         variants_json = "[" + ",".join(v.model_dump_json() for v in ps.variants) + "]"
+        import json as _json
+        images_json = _json.dumps(ps.images or [])
 
-        cur.execute(
-            """
-            INSERT INTO core.products
-              (brand_id, canonical_name, variants, description_raw, description_source, ingredient_scrape_status)
-            VALUES (%s, %s, %s::jsonb, %s, %s, 'pending')
-            RETURNING id
-            """,
-            (
-                brand_id,
-                ps.canonical_name,
-                variants_json,
-                ps.description_raw,
-                "shopify_body_html" if ps.retailer_slug not in ("tira", "purplle") else "product_page_scrape",
-            ),
-        )
-        product_id = cur.fetchone()[0]
+        # Amazon and other non-canonical retailers: only add a listing, never create a product.
+        if not can_create:
+            cur.execute(
+                "SELECT id FROM core.products WHERE brand_id = %s AND canonical_name = %s",
+                (brand_id, ps.canonical_name),
+            )
+            existing = cur.fetchone()
+            if not existing:
+                log.info("skipping_non_canonical_new_product",
+                         retailer=ps.retailer_slug, name=ps.canonical_name)
+                return
+            product_id = existing[0]
+        else:
+            cur.execute(
+                """
+                INSERT INTO core.products
+                  (brand_id, canonical_name, variants, images, image_priority,
+                   description_raw, description_source, ingredient_scrape_status)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, 'pending')
+                ON CONFLICT (brand_id, canonical_name) DO UPDATE SET
+                  -- Higher-priority source (lower number) wins on all canonical fields
+                  images = CASE
+                    WHEN EXCLUDED.image_priority <= core.products.image_priority
+                    THEN EXCLUDED.images ELSE core.products.images
+                  END,
+                  variants = CASE
+                    WHEN EXCLUDED.image_priority <= core.products.image_priority
+                    THEN EXCLUDED.variants ELSE core.products.variants
+                  END,
+                  description_raw = CASE
+                    WHEN EXCLUDED.image_priority <= core.products.image_priority
+                      AND EXCLUDED.description_raw IS NOT NULL
+                    THEN EXCLUDED.description_raw ELSE core.products.description_raw
+                  END,
+                  description_source = CASE
+                    WHEN EXCLUDED.image_priority <= core.products.image_priority
+                      AND EXCLUDED.description_raw IS NOT NULL
+                    THEN EXCLUDED.description_source ELSE core.products.description_source
+                  END,
+                  image_priority = LEAST(EXCLUDED.image_priority, core.products.image_priority)
+                RETURNING id
+                """,
+                (
+                    brand_id,
+                    ps.canonical_name,
+                    variants_json,
+                    images_json,
+                    image_priority,
+                    ps.description_raw,
+                    "shopify_body_html" if ps.retailer_slug not in ("tira", "purplle") else "product_page_scrape",
+                ),
+            )
+            product_id = cur.fetchone()[0]
 
         # Retailer listing.
         cur.execute(
@@ -201,11 +250,10 @@ def verify_queries(conn: psycopg.Connection) -> None:
             log.info("query_shelf_read", results=cur.fetchall())
 
         # 3. Search: trigram search for "niacinamide".
-        cur.execute("""
-            SELECT canonical_name FROM core.products
-             WHERE canonical_name %% 'niacinamide'
-             LIMIT 5
-        """)
+        cur.execute(
+            "SELECT canonical_name FROM core.products WHERE canonical_name %% %s LIMIT 5",
+            ("niacinamide",),
+        )
         log.info("query_search_trgm", results=cur.fetchall())
 
         # 4. Ingredient queue depth.

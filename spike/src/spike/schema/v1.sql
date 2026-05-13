@@ -50,6 +50,7 @@ CREATE TABLE core.products (
   canonical_category_id         BIGINT REFERENCES taxonomy.categories(id),
   variants                      JSONB NOT NULL DEFAULT '[]'::jsonb,
   images                        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  image_priority                INT NOT NULL DEFAULT 99,  -- lower = higher quality source
   description_raw               TEXT,
   -- delta 5: track where the description came from
   description_source            TEXT,
@@ -58,7 +59,8 @@ CREATE TABLE core.products (
   data_freshness                JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- delta 2: track ingredient extraction status per product
   ingredient_scrape_status      TEXT NOT NULL DEFAULT 'pending',
-  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (brand_id, canonical_name)
 );
 CREATE INDEX products_name_trgm ON core.products USING gin (canonical_name gin_trgm_ops);
 
@@ -156,7 +158,7 @@ CREATE TABLE core.price_history_2026_05 PARTITION OF core.price_history
 CREATE TABLE users.users (
   id                    BIGSERIAL PRIMARY KEY,
   phone                 TEXT UNIQUE,
-  email                 TEXT,
+  email                 TEXT UNIQUE,
   name                  TEXT,
   profile               JSONB NOT NULL DEFAULT '{}'::jsonb,
   theme_slug            TEXT NOT NULL DEFAULT 'tile',
